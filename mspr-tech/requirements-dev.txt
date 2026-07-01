@@ -1,0 +1,8 @@
+# Dependances de developpement/CI uniquement. Les regles de qualite testees (tests/test_quality_rules.py)
+# vivent dans spark_jobs/quality_rules.py, un module sans dependance a pyspark : pas besoin
+# d'installer PySpark ici, ce qui garde la CI rapide et evite les soucis de compatibilite
+# pyspark/version de Python (cf. spark_jobs/velib_batch_processing.py qui, lui, s'execute
+# dans le conteneur Spark ou pyspark est deja fourni par l'image apache/spark-py:v3.4.0).
+-r requirements.txt
+pytest==8.3.3
+flake8==7.1.1

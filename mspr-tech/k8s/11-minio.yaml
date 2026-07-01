@@ -1,0 +1,86 @@
+# MinIO distribue, 4 noeuds (erasure coding) - pattern officiel StatefulSet + service headless
+# (https://min.io/docs/minio/kubernetes/upstream/). Equivalent Kubernetes de minio1..4 + nginx
+# du docker-compose (ici, le Service ClusterIP "minio" fait office de load-balancer natif).
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio-headless
+  namespace: velibdata
+  labels:
+    app: minio
+spec:
+  clusterIP: None
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+    - name: console
+      port: 9001
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: velibdata
+  labels:
+    app: minio
+spec:
+  selector:
+    app: minio
+  ports:
+    - name: s3
+      port: 9000
+    - name: console
+      port: 9001
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: velibdata
+spec:
+  serviceName: minio-headless
+  replicas: 4
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+          args:
+            - server
+            - --console-address
+            - ":9001"
+            - "http://minio-{0...3}.minio-headless.velibdata.svc.cluster.local/data"
+          envFrom:
+            - secretRef:
+                name: velibdata-secrets
+          ports:
+            - containerPort: 9000
+              name: s3
+            - containerPort: 9001
+              name: console
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            exec:
+              command: ["mc", "ready", "local"]
+            initialDelaySeconds: 20
+            periodSeconds: 15
+      terminationGracePeriodSeconds: 30
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi

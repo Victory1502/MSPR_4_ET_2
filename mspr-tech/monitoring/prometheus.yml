@@ -1,0 +1,32 @@
+# Configuration Prometheus - collecte des metriques d'infrastructure VelibData.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Lag des consommateurs, debit des topics, etat du cluster Kafka (3 brokers).
+  - job_name: "kafka"
+    static_configs:
+      - targets: ["kafka-exporter:9308"]
+
+  # Connexions actives, taille de la base, statut de replication PostgreSQL (primary).
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # CPU/memoire/IO par conteneur (detection de fuites memoire, cf. plan_maintenance.md).
+  - job_name: "cadvisor"
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # Metriques du daemon Spark master (jobs actifs, workers enregistres) - cf. monitoring/spark-metrics.properties.
+  # Note : seul le master est scrape statiquement ici (nom stable) ; le suivi par-worker (dont le
+  # nombre varie) est prevu via la decouverte de service Kubernetes (cf. mspr-tech/k8s/).
+  - job_name: "spark-master"
+    metrics_path: /metrics/master/prometheus
+    static_configs:
+      - targets: ["spark-master:8080"]

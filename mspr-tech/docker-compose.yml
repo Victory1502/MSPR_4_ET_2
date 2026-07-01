@@ -1,69 +1,250 @@
 # Toutes les images sont figees a une version precise (pas de tag ":latest") pour garantir
 # la reproductibilite du deploiement entre les membres de l'equipe - cf. docs/bloc4/architecture.md.
 # Les secrets sont lus depuis le fichier .env (non versionne, cf. .env.example).
+#
+# Architecture "cluster tolerant aux pannes" (cf. docs/bloc4/architecture.md section "Haute disponibilite") :
+#   - Kafka   : 3 brokers en mode KRaft (quorum de controleurs), replication factor = 3, min ISR = 2
+#               -> perte d'un broker sur 3 = zero interruption de service.
+#   - MinIO   : 4 noeuds en mode distribue avec erasure coding (tolerance a la perte de 2 noeuds/disques)
+#               derriere un load-balancer nginx.
+#   - Postgres: 1 primary + 1 replica en streaming replication physique (lecture seule sur la replique,
+#               bascule manuelle documentee dans le plan de maintenance en cas de panne du primary).
+#   - Spark   : 1 master + 3 workers (nœuds de calcul paralleles).
+
+# Blocs communs factorises via ancres YAML (x-* = extension fields, ignores par Docker Compose).
+x-kafka-common-env: &kafka-common-env
+  KAFKA_PROCESS_ROLES: broker,controller
+  CLUSTER_ID: MkU3OEVBQTQ2RTlBQzhFMA
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka-1:19093,2@kafka-2:19093,3@kafka-3:19093
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  # Tolerance aux pannes : chaque topic est replique sur les 3 brokers, avec au moins
+  # 2 replicas synchrones exiges avant d'accuser reception (min ISR) -> zero perte de
+  # message si un seul broker tombe.
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_DEFAULT_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: 2
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+
+x-minio-common-env: &minio-common-env
+  MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+  MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+
+x-spark-worker-env: &spark-worker-env
+  SPARK_MODE: worker
+  SPARK_MASTER_URL: spark://spark-master:7077
+  SPARK_WORKER_CORES: 1
+  SPARK_WORKER_MEMORY: 1g
 
 services:
-  # Kafka en mode KRaft (broker + controleur combines, sans Zookeeper).
-  # Choix assume : Zookeeper est deprecie par la communaute Kafka depuis la 3.x,
-  # le mode KRaft simplifie le cluster (un service en moins a administrer/superviser).
-  kafka:
+  # ============================= KAFKA (cluster KRaft, 3 brokers) =============================
+  kafka-1:
     image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka-1
     ports:
       - "9092:9092"
     environment:
+      <<: *kafka-common-env
       KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      CLUSTER_ID: MkU3OEVBQTQ2RTlBQzhFMA
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:29092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:19093,INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka-1:29092
+    volumes:
+      - kafka1_data:/var/lib/kafka/data
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 15s
       timeout: 10s
       retries: 5
+    restart: unless-stopped
 
-  minio:
-    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
-    command: server /data --console-address ":9001"
+  kafka-2:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka-2
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "9093:9092"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      <<: *kafka-common-env
+      KAFKA_NODE_ID: 2
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:19093,INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9093,INTERNAL://kafka-2:29092
     volumes:
-      - minio_data:/data
+      - kafka2_data:/var/lib/kafka/data
     healthcheck:
-      # L'image MinIO ne fournit pas curl : on utilise le client "mc" livre avec l'image.
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  kafka-3:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka-3
+    ports:
+      - "9094:9092"
+    environment:
+      <<: *kafka-common-env
+      KAFKA_NODE_ID: 3
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:19093,INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9094,INTERNAL://kafka-3:29092
+    volumes:
+      - kafka3_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    command:
+      - "--kafka.server=kafka-1:29092"
+      - "--kafka.server=kafka-2:29092"
+      - "--kafka.server=kafka-3:29092"
+    ports:
+      - "9308:9308"
+    depends_on:
+      - kafka-1
+      - kafka-2
+      - kafka-3
+    restart: unless-stopped
+
+  # ============================= MINIO (cluster distribue, 4 noeuds, erasure coding) =============================
+  minio1:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    hostname: minio1
+    command: server --console-address ":9001" http://minio{1...4}/data
+    environment: *minio-common-env
+    volumes:
+      - minio1_data:/data
+    healthcheck:
       test: ["CMD", "mc", "ready", "local"]
       interval: 15s
       timeout: 10s
       retries: 5
+    restart: unless-stopped
 
-  # Base normalisee (couche "silver") requetable par les Data Analysts/Scientists.
-  postgres:
+  minio2:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    hostname: minio2
+    command: server --console-address ":9001" http://minio{1...4}/data
+    environment: *minio-common-env
+    volumes:
+      - minio2_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  minio3:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    hostname: minio3
+    command: server --console-address ":9001" http://minio{1...4}/data
+    environment: *minio-common-env
+    volumes:
+      - minio3_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  minio4:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    hostname: minio4
+    command: server --console-address ":9001" http://minio{1...4}/data
+    environment: *minio-common-env
+    volumes:
+      - minio4_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Load-balancer devant les 4 noeuds MinIO : point d'entree unique pour les clients S3 (boto3)
+  # et la console web, cf. minio/nginx.conf.
+  minio-lb:
+    image: nginx:1.25-alpine
+    volumes:
+      - ./minio/nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    depends_on:
+      - minio1
+      - minio2
+      - minio3
+      - minio4
+    restart: unless-stopped
+
+  # ============================= POSTGRESQL (primary + replique en streaming replication) =============================
+  postgres-primary:
     image: postgres:16-alpine
+    hostname: postgres-primary
+    command: >
+      postgres -c wal_level=replica -c max_wal_senders=5 -c max_replication_slots=5 -c hot_standby=on
     ports:
       - "5432:5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-velibdata}
       POSTGRES_USER: ${POSTGRES_USER:-velib_app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_REPLICATOR_USER: ${POSTGRES_REPLICATOR_USER:-replicator}
+      POSTGRES_REPLICATOR_PASSWORD: ${POSTGRES_REPLICATOR_PASSWORD:-changeme_replicator}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./sql/init_schema.sql:/docker-entrypoint-initdb.d/init_schema.sql:ro
+      - postgres_primary_data:/var/lib/postgresql/data
+      - ./sql/init_schema.sql:/docker-entrypoint-initdb.d/01_init_schema.sql:ro
+      - ./sql/init_replication.sh:/docker-entrypoint-initdb.d/02_init_replication.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-velib_app} -d ${POSTGRES_DB:-velibdata}"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
+  postgres-replica:
+    image: postgres:16-alpine
+    hostname: postgres-replica
+    entrypoint: ["bash", "/replica-entrypoint.sh"]
+    ports:
+      - "5433:5432"
+    environment:
+      PGUSER: ${POSTGRES_REPLICATOR_USER:-replicator}
+      PGPASSWORD: ${POSTGRES_REPLICATOR_PASSWORD:-changeme_replicator}
+      PRIMARY_HOST: postgres-primary
+      PRIMARY_PORT: "5432"
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+      - ./sql/replica-entrypoint.sh:/replica-entrypoint.sh:ro
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_REPLICATOR_USER:-replicator}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:-velib_app}:${POSTGRES_PASSWORD:-changeme}@postgres-primary:5432/${POSTGRES_DB:-velibdata}?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - postgres-primary
+    restart: unless-stopped
+
+  # ============================= SPARK (1 master + 3 workers) =============================
   spark-master:
     image: apache/spark-py:v3.4.0
     container_name: spark-master
@@ -71,16 +252,14 @@ services:
       SPARK_MODE: master
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
-      # Le job spark_jobs/velib_batch_processing.py s'execute en mode client depuis ce
-      # conteneur (driver) : il a donc besoin des memes identifiants que les producteurs.
-      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_BOOTSTRAP_SERVERS: kafka-1:29092,kafka-2:29092,kafka-3:29092
       KAFKA_TOPIC_STATIONS: ${KAFKA_TOPIC_STATIONS:-velib.stations.raw}
       KAFKA_TOPIC_DISPONIBILITE: ${KAFKA_TOPIC_DISPONIBILITE:-velib.disponibilite.raw}
-      MINIO_ENDPOINT: minio:9000
+      MINIO_ENDPOINT: minio-lb:9000
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-velib-data}
-      POSTGRES_HOST: postgres
+      POSTGRES_HOST: postgres-primary
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-velibdata}
       POSTGRES_USER: ${POSTGRES_USER:-velib_app}
@@ -90,29 +269,95 @@ services:
       - "7077:7077"
     volumes:
       - .:/opt/spark-apps
+      - ./monitoring/spark-metrics.properties:/opt/spark/conf/metrics.properties:ro
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]
       interval: 15s
       timeout: 10s
       retries: 5
+    restart: unless-stopped
 
-  spark-worker:
+  spark-worker-1:
     image: apache/spark-py:v3.4.0
-    container_name: spark-worker
+    container_name: spark-worker-1
     depends_on:
       spark-master:
         condition: service_healthy
-    environment:
-      SPARK_MODE: worker
-      SPARK_MASTER_URL: spark://spark-master:7077
-    ports:
-      - "8081:8081"
+    environment: *spark-worker-env
     volumes:
       - .:/opt/spark-apps
     # --work-dir pointe vers /tmp (accessible en ecriture par l'utilisateur non-root de l'image),
     # /opt/spark/work par defaut n'est pas inscriptible par l'utilisateur applicatif du conteneur.
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --work-dir /tmp/spark-work
+    restart: unless-stopped
+
+  spark-worker-2:
+    image: apache/spark-py:v3.4.0
+    container_name: spark-worker-2
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment: *spark-worker-env
+    volumes:
+      - .:/opt/spark-apps
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --work-dir /tmp/spark-work
+    restart: unless-stopped
+
+  spark-worker-3:
+    image: apache/spark-py:v3.4.0
+    container_name: spark-worker-3
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment: *spark-worker-env
+    volumes:
+      - .:/opt/spark-apps
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --work-dir /tmp/spark-work
+    restart: unless-stopped
+
+  # ============================= MONITORING (Prometheus + Grafana + cAdvisor) =============================
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    ports:
+      - "8085:8080"
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+    ports:
+      - "9090:9090"
+    depends_on:
+      - kafka-exporter
+      - postgres-exporter
+      - cadvisor
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme_grafana}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
 
 networks:
   default:
@@ -120,5 +365,14 @@ networks:
     driver: bridge
 
 volumes:
-  minio_data:
-  postgres_data:
+  kafka1_data:
+  kafka2_data:
+  kafka3_data:
+  minio1_data:
+  minio2_data:
+  minio3_data:
+  minio4_data:
+  postgres_primary_data:
+  postgres_replica_data:
+  prometheus_data:
+  grafana_data:

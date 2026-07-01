@@ -1,0 +1,106 @@
+# Spark master + workers, avec autoscaling horizontal des workers (HPA) selon la charge CPU -
+# repond au critere "dimensionner en temps reel les besoins en consommation de ressources".
+# Necessite metrics-server installe sur le cluster (cf. k8s/README.md).
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-master
+  namespace: velibdata
+  labels:
+    app: spark-master
+spec:
+  selector:
+    app: spark-master
+  ports:
+    - name: rpc
+      port: 7077
+    - name: ui
+      port: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-master
+  namespace: velibdata
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: spark-master}
+  template:
+    metadata:
+      labels: {app: spark-master}
+    spec:
+      containers:
+        - name: spark-master
+          image: apache/spark-py:v3.4.0
+          command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.master.Master"]
+          envFrom:
+            - configMapRef: {name: velibdata-config}
+            - secretRef: {name: velibdata-secrets}
+          env:
+            - {name: SPARK_MASTER_HOST, value: spark-master}
+          ports:
+            - {containerPort: 7077}
+            - {containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /, port: 8080}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spark-worker
+  namespace: velibdata
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: spark-worker}
+  template:
+    metadata:
+      labels: {app: spark-worker}
+    spec:
+      containers:
+        - name: spark-worker
+          image: apache/spark-py:v3.4.0
+          command:
+            - /opt/spark/bin/spark-class
+            - org.apache.spark.deploy.worker.Worker
+            - spark://spark-master.velibdata.svc.cluster.local:7077
+            - --work-dir
+            - /tmp/spark-work
+          envFrom:
+            - configMapRef: {name: velibdata-config}
+            - secretRef: {name: velibdata-secrets}
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "1"
+              memory: "2Gi"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: spark-worker-hpa
+  namespace: velibdata
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: spark-worker
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 120
+    scaleUp:
+      stabilizationWindowSeconds: 0

@@ -1,0 +1,152 @@
+# PostgreSQL primary + replique en streaming replication - meme principe que docker-compose
+# (sql/init_replication.sh, sql/replica-entrypoint.sh), scripts injectes ici via ConfigMap.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: velibdata
+# Ce ConfigMap est un gabarit : en pratique, on le genere directement depuis les fichiers
+# source de verite (mspr-tech/sql/) plutot que de dupliquer leur contenu ici a la main :
+#   kubectl create configmap postgres-init-scripts -n velibdata \
+#     --from-file=01_init_schema.sql=../sql/init_schema.sql \
+#     --from-file=02_init_replication.sh=../sql/init_replication.sh \
+#     --from-file=replica-entrypoint.sh=../sql/replica-entrypoint.sh \
+#     --dry-run=client -o yaml | kubectl apply -f -
+# (cf. mspr-tech/k8s/README.md)
+data:
+  01_init_schema.sql: "# genere via kubectl create configmap --from-file, cf. commentaire ci-dessus"
+  02_init_replication.sh: "# genere via kubectl create configmap --from-file, cf. commentaire ci-dessus"
+  replica-entrypoint.sh: "# genere via kubectl create configmap --from-file, cf. commentaire ci-dessus"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-primary
+  namespace: velibdata
+  labels:
+    app: postgres-primary
+spec:
+  selector:
+    app: postgres-primary
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-primary
+  namespace: velibdata
+spec:
+  serviceName: postgres-primary
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-primary
+  template:
+    metadata:
+      labels:
+        app: postgres-primary
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          command:
+            - postgres
+            - -c
+            - wal_level=replica
+            - -c
+            - max_wal_senders=5
+            - -c
+            - max_replication_slots=5
+            - -c
+            - hot_standby=on
+          envFrom:
+            - configMapRef: {name: velibdata-config}
+            - secretRef: {name: velibdata-secrets}
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "$(POSTGRES_USER)"]}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: {requests: {storage: 10Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-replica
+  namespace: velibdata
+  labels:
+    app: postgres-replica
+spec:
+  selector:
+    app: postgres-replica
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres-replica
+  namespace: velibdata
+spec:
+  serviceName: postgres-replica
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres-replica
+  template:
+    metadata:
+      labels:
+        app: postgres-replica
+    spec:
+      containers:
+        - name: postgres-replica
+          image: postgres:16-alpine
+          command: ["bash", "/scripts/replica-entrypoint.sh"]
+          env:
+            - name: PRIMARY_HOST
+              value: postgres-primary.velibdata.svc.cluster.local
+            - name: PRIMARY_PORT
+              value: "5432"
+            - name: PGUSER
+              valueFrom: {secretKeyRef: {name: velibdata-secrets, key: POSTGRES_REPLICATOR_USER}}
+            - name: PGPASSWORD
+              valueFrom: {secretKeyRef: {name: velibdata-secrets, key: POSTGRES_REPLICATOR_PASSWORD}}
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: scripts
+              mountPath: /scripts
+          readinessProbe:
+            exec: {command: ["pg_isready"]}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: scripts
+          configMap:
+            name: postgres-init-scripts
+            defaultMode: 0755
+            items:
+              - key: replica-entrypoint.sh
+                path: replica-entrypoint.sh
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: {requests: {storage: 10Gi}}

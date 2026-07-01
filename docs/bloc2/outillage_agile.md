@@ -42,8 +42,22 @@ Board **"VélibData"**, structuré en colonnes :
 
 Ce tableau de bord est revu quotidiennement en Daily Meeting et alimente les ajustements de priorité (cf. [organisation_equipe.md](organisation_equipe.md), section 3).
 
-## 6. Suivi des prestataires / fournisseurs externes
-Le projet ne mobilise pas de prestataire de services informatiques externe (infrastructure auto-hébergée). Les seuls tiers du projet sont des **fournisseurs de données** (API publiques) :
+## 6. Pilotage des prestataires extérieurs
+
+### 6.1 Prestataire d'infogérance retenu (scénario de mise en production)
+Le MVP (6 jours, cf. [planning.md](planning.md)) tourne en infrastructure auto-hébergée locale (Docker Compose), sans prestataire externe. Pour la mise en situation professionnelle, l'équipe a construit le scénario de bascule vers la production que ce MVP prépare (cf. pistes d'évolution citées dans [architecture.md](../bloc4/architecture.md) et [securite_rgpd.md](../bloc4/securite_rgpd.md) : hébergement région UE) : un contrat d'infogérance a été négocié pour héberger le cluster (Kafka/MinIO/Postgres/Spark, cf. architecture.md) au-delà de la phase de développement.
+
+| Élément | Détail |
+|---|---|
+| **Coordonnées du prestataire** | OVHcloud (OVH SAS), 2 rue Kellermann, 59100 Roubaix — contact commercial dédié + support technique |
+| **Nature et type de prestation** | Hébergement Public Cloud région France (Gravelines/Strasbourg, conformité RGPD localisation UE) + infogérance infrastructure niveau 2 (astreinte incidents) |
+| **Dates et durée du contrat** | Contrat annuel reconductible tacitement, prise d'effet à la bascule production (au-delà du 06/07/2026, date de soutenance du MVP) |
+| **Indicateurs de performance retenus** | Disponibilité mensuelle de l'infrastructure (SLA), temps de première réponse à incident (TTR), temps de résolution (TTC) |
+| **Pénalités associées (cohérentes avec le SLA)** | SLA contractuel : 99,9 % de disponibilité mensuelle. En-dessous du seuil : remise dégressive sur la facture du mois (ex. −5 % par tranche entamée de 0,1 % de disponibilité manquante), plafonnée contractuellement |
+| **Fréquence du suivi** | Rapport de disponibilité mensuel ; suivi hebdomadaire des tickets ouverts ; remontée immédiate pour tout incident critique (P1) |
+
+### 6.2 Fournisseurs de données (API publiques)
+Le MVP mobilise par ailleurs des **fournisseurs de données** (API publiques, pas des prestataires de service au sens strict, mais suivis avec la même rigueur) :
 
 | Fournisseur | Nature de la prestation | SLA connu / contrainte | Fréquence de suivi |
 |---|---|---|---|

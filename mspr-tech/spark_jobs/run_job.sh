@@ -13,7 +13,11 @@ docker exec -e HOME=/tmp spark-master pip install --quiet boto3 psycopg2-binary
 
 # --conf spark.jars.ivy : /opt/spark n'est pas inscriptible par l'utilisateur non-root de
 # l'image, le cache Ivy utilise pour resoudre --packages est donc redirige vers /tmp.
-docker exec -e HOME=/tmp spark-master /opt/spark/bin/spark-submit \
+# PYTHONPATH=/opt/spark-apps : spark-submit ne place que le dossier du script sur sys.path
+# (/opt/spark-apps/spark_jobs), pas son parent -> sans cette variable, "from spark_jobs.quality_rules
+# import ..." echoue avec ModuleNotFoundError. /opt/spark-apps est le point de montage du volume
+# "." (racine mspr-tech), qui contient bien le package spark_jobs/.
+docker exec -e HOME=/tmp -e PYTHONPATH=/opt/spark-apps spark-master /opt/spark/bin/spark-submit \
   --master spark://spark-master:7077 \
   --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0 \
   --conf spark.jars.ivy=/tmp/.ivy2 \

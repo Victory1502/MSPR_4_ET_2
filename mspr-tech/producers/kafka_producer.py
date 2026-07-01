@@ -15,6 +15,7 @@ import logging
 import os
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import psycopg2
@@ -22,23 +23,41 @@ import requests
 from dotenv import load_dotenv
 from kafka import KafkaProducer
 
-load_dotenv()
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("kafka_producer")
 
-KAFKA_BOOTSTRAP_SERVERS = os.environ["KAFKA_BOOTSTRAP_SERVERS"]
-TOPIC_STATIONS = os.environ.get("KAFKA_TOPIC_STATIONS", "velib.stations.raw")
-TOPIC_DISPONIBILITE = os.environ.get("KAFKA_TOPIC_DISPONIBILITE", "velib.disponibilite.raw")
-FETCH_INTERVAL_SECONDS = int(os.environ.get("FETCH_INTERVAL_SECONDS", "60"))
 
-POSTGRES_DSN = (
-    f"host={os.environ.get('POSTGRES_HOST', 'localhost')} "
-    f"port={os.environ.get('POSTGRES_PORT', '5432')} "
-    f"dbname={os.environ['POSTGRES_DB']} "
-    f"user={os.environ['POSTGRES_USER']} "
-    f"password={os.environ['POSTGRES_PASSWORD']}"
-)
+@dataclass(frozen=True)
+class ProducerConfig:
+    """Resolue une seule fois dans main() : evite de lire l'environnement a l'import du
+    module (import-time side effects), ce qui permet d'importer ce fichier depuis les tests
+    sans avoir toutes les variables d'environnement de production definies."""
+    kafka_bootstrap_servers: str
+    topic_stations: str
+    topic_disponibilite: str
+    fetch_interval_seconds: int
+    postgres_dsn: str
+
+
+def load_config() -> ProducerConfig:
+    load_dotenv()
+    return ProducerConfig(
+        # Cote hote (script lance hors Docker) : les 3 ports exposes des 3 brokers Kafka.
+        kafka_bootstrap_servers=os.environ.get(
+            "KAFKA_BOOTSTRAP_SERVERS", "localhost:9092,localhost:9093,localhost:9094"
+        ),
+        topic_stations=os.environ.get("KAFKA_TOPIC_STATIONS", "velib.stations.raw"),
+        topic_disponibilite=os.environ.get("KAFKA_TOPIC_DISPONIBILITE", "velib.disponibilite.raw"),
+        fetch_interval_seconds=int(os.environ.get("FETCH_INTERVAL_SECONDS", "60")),
+        postgres_dsn=(
+            f"host={os.environ.get('POSTGRES_HOST', 'localhost')} "
+            f"port={os.environ.get('POSTGRES_PORT', '5432')} "
+            f"dbname={os.environ['POSTGRES_DB']} "
+            f"user={os.environ['POSTGRES_USER']} "
+            f"password={os.environ['POSTGRES_PASSWORD']}"
+        ),
+    )
+
 
 URL_STATIONS = (
     "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/"
@@ -50,11 +69,12 @@ URL_DISPONIBILITE = (
 )
 
 
-def log_alert(alerte_type: str, severity: str, description: str, metric_value: float = None) -> None:
+def log_alert(cfg: ProducerConfig, alerte_type: str, severity: str, description: str,
+              metric_value: float = None) -> None:
     """Trace une anomalie a la fois dans les logs et dans la table de supervision pipeline_alertes."""
     logger.warning("ALERTE [%s/%s] %s", severity, alerte_type, description)
     try:
-        with psycopg2.connect(POSTGRES_DSN) as conn:
+        with psycopg2.connect(cfg.postgres_dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -67,7 +87,7 @@ def log_alert(alerte_type: str, severity: str, description: str, metric_value: f
         logger.exception("Impossible d'ecrire l'alerte dans PostgreSQL (pipeline_alertes)")
 
 
-def fetch_data(url: str, source_name: str) -> dict | None:
+def fetch_data(cfg: ProducerConfig, url: str, source_name: str) -> dict | None:
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
@@ -75,10 +95,10 @@ def fetch_data(url: str, source_name: str) -> dict | None:
         nb_records = len(data.get("results", []))
         logger.info("%s : %d enregistrements recuperes", source_name, nb_records)
         if nb_records == 0:
-            log_alert("API_REPONSE_VIDE", "WARNING", f"{source_name} a renvoye 0 enregistrement")
+            log_alert(cfg, "API_REPONSE_VIDE", "WARNING", f"{source_name} a renvoye 0 enregistrement")
         return data
     except requests.RequestException as exc:
-        log_alert("API_INDISPONIBLE", "CRITICAL", f"Echec appel {source_name} : {exc}")
+        log_alert(cfg, "API_INDISPONIBLE", "CRITICAL", f"Echec appel {source_name} : {exc}")
         return None
 
 
@@ -95,23 +115,24 @@ def publish(producer: KafkaProducer, topic: str, source_name: str, payload: dict
 
 
 def main() -> None:
-    logger.info("=== Producteur Kafka VelibData - intervalle %ss ===", FETCH_INTERVAL_SECONDS)
+    cfg = load_config()
+    logger.info("=== Producteur Kafka VelibData - intervalle %ss ===", cfg.fetch_interval_seconds)
     producer = KafkaProducer(
-        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        bootstrap_servers=cfg.kafka_bootstrap_servers,
         value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
     )
 
     try:
         while True:
-            stations_data = fetch_data(URL_STATIONS, "stations")
+            stations_data = fetch_data(cfg, URL_STATIONS, "stations")
             if stations_data:
-                publish(producer, TOPIC_STATIONS, "stations", stations_data)
+                publish(producer, cfg.topic_stations, "stations", stations_data)
 
-            dispo_data = fetch_data(URL_DISPONIBILITE, "disponibilite")
+            dispo_data = fetch_data(cfg, URL_DISPONIBILITE, "disponibilite")
             if dispo_data:
-                publish(producer, TOPIC_DISPONIBILITE, "disponibilite", dispo_data)
+                publish(producer, cfg.topic_disponibilite, "disponibilite", dispo_data)
 
-            time.sleep(FETCH_INTERVAL_SECONDS)
+            time.sleep(cfg.fetch_interval_seconds)
     except KeyboardInterrupt:
         logger.info("Arret demande par l'utilisateur.")
     finally:

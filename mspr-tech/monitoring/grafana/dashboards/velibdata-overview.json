@@ -1,0 +1,74 @@
+{
+  "title": "VelibData - Vue d'ensemble infrastructure",
+  "uid": "velibdata-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": { "from": "now-1h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Brokers Kafka en ligne",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "count(kafka_brokers)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Debit messages Kafka (par topic)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(kafka_topic_partition_current_offset[5m])) by (topic)", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Connexions actives PostgreSQL",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        { "expr": "pg_stat_database_numbackends", "refId": "A" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Lag replication PostgreSQL (octets)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "pg_replication_lag", "refId": "A" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "CPU par conteneur (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(container_cpu_usage_seconds_total{name!=\"\"}[5m])) by (name) * 100", "refId": "A" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Memoire par conteneur (Mo) - detection de fuites",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "container_memory_usage_bytes{name!=\"\"} / 1024 / 1024", "refId": "A" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Workers Spark enregistres",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "metrics_master_aliveWorkers_Value", "refId": "A" }
+      ]
+    }
+  ]
+}

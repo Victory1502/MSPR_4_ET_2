@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velibdata-config
+  namespace: velibdata
+data:
+  KAFKA_TOPIC_STATIONS: "velib.stations.raw"
+  KAFKA_TOPIC_DISPONIBILITE: "velib.disponibilite.raw"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka-0.kafka-headless.velibdata.svc.cluster.local:29092,kafka-1.kafka-headless.velibdata.svc.cluster.local:29092,kafka-2.kafka-headless.velibdata.svc.cluster.local:29092"
+  MINIO_ENDPOINT: "minio.velibdata.svc.cluster.local:9000"
+  MINIO_BUCKET: "velib-data"
+  POSTGRES_HOST: "postgres-primary.velibdata.svc.cluster.local"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "velibdata"
+  FETCH_INTERVAL_SECONDS: "60"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-common-config
+  namespace: velibdata
+data:
+  KAFKA_PROCESS_ROLES: "broker,controller"
+  CLUSTER_ID: "MkU3OEVBQTQ2RTlBQzhFMA"
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT"
+  KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+  KAFKA_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+  # Quorum de controleurs : 3 pods stables du StatefulSet (kafka-0/1/2), adresses via le
+  # service headless - cf. 10-kafka.yaml.
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka-0.kafka-headless.velibdata.svc.cluster.local:19093,2@kafka-1.kafka-headless.velibdata.svc.cluster.local:19093,3@kafka-2.kafka-headless.velibdata.svc.cluster.local:19093"
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+  KAFKA_DEFAULT_REPLICATION_FACTOR: "3"
+  KAFKA_MIN_INSYNC_REPLICAS: "2"
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
