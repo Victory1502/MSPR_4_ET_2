@@ -1,0 +1,7 @@
+requests==2.34.2
+# kafka-python 2.0.2 est incompatible avec Python 3.12+ (module kafka.vendor.six.moves manquant).
+# kafka-python-ng est un fork maintenu qui corrige ce probleme, meme namespace d'import "kafka".
+kafka-python-ng==2.2.3
+python-dotenv==1.0.1
+boto3==1.43.10
+psycopg2-binary==2.9.12

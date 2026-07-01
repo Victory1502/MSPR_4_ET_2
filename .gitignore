@@ -1,0 +1,9 @@
+# Config locale de l'assistant (ne pas partager)
+.claude/settings.local.json
+
+# Divers OS
+Thumbs.db
+.DS_Store
+
+# Donnees Docker locales
+mspr-tech/minio_data/

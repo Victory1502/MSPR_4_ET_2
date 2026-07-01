@@ -1,0 +1,10 @@
+# Environnement virtuel Python (cree par venv) - a ne jamais versionner
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
+
+# Artefacts Python
+__pycache__/
+*.pyc
+.env

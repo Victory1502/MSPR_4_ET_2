@@ -1,0 +1,124 @@
+# Toutes les images sont figees a une version precise (pas de tag ":latest") pour garantir
+# la reproductibilite du deploiement entre les membres de l'equipe - cf. docs/bloc4/architecture.md.
+# Les secrets sont lus depuis le fichier .env (non versionne, cf. .env.example).
+
+services:
+  # Kafka en mode KRaft (broker + controleur combines, sans Zookeeper).
+  # Choix assume : Zookeeper est deprecie par la communaute Kafka depuis la 3.x,
+  # le mode KRaft simplifie le cluster (un service en moins a administrer/superviser).
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      CLUSTER_ID: MkU3OEVBQTQ2RTlBQzhFMA
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,INTERNAL://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,INTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      # L'image MinIO ne fournit pas curl : on utilise le client "mc" livre avec l'image.
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # Base normalisee (couche "silver") requetable par les Data Analysts/Scientists.
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-velibdata}
+      POSTGRES_USER: ${POSTGRES_USER:-velib_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init_schema.sql:/docker-entrypoint-initdb.d/init_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-velib_app} -d ${POSTGRES_DB:-velibdata}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  spark-master:
+    image: apache/spark-py:v3.4.0
+    container_name: spark-master
+    environment:
+      SPARK_MODE: master
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      # Le job spark_jobs/velib_batch_processing.py s'execute en mode client depuis ce
+      # conteneur (driver) : il a donc besoin des memes identifiants que les producteurs.
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC_STATIONS: ${KAFKA_TOPIC_STATIONS:-velib.stations.raw}
+      KAFKA_TOPIC_DISPONIBILITE: ${KAFKA_TOPIC_DISPONIBILITE:-velib.disponibilite.raw}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BUCKET: ${MINIO_BUCKET:-velib-data}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-velibdata}
+      POSTGRES_USER: ${POSTGRES_USER:-velib_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    volumes:
+      - .:/opt/spark-apps
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  spark-worker:
+    image: apache/spark-py:v3.4.0
+    container_name: spark-worker
+    depends_on:
+      spark-master:
+        condition: service_healthy
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+    ports:
+      - "8081:8081"
+    volumes:
+      - .:/opt/spark-apps
+    # --work-dir pointe vers /tmp (accessible en ecriture par l'utilisateur non-root de l'image),
+    # /opt/spark/work par defaut n'est pas inscriptible par l'utilisateur applicatif du conteneur.
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077 --work-dir /tmp/spark-work
+
+networks:
+  default:
+    name: velib-network
+    driver: bridge
+
+volumes:
+  minio_data:
+  postgres_data:
