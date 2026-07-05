@@ -1,0 +1,136 @@
+{
+  "title": "VelibData - Usage (T7, Data Analyst)",
+  "uid": "velibdata-usage",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-2d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Nombre de stations actives",
+      "type": "stat",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "targets": [
+        { "datasource": { "type": "postgres" }, "format": "table", "rawSql": "SELECT count(*) FROM stations", "refId": "A" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Capacite totale du reseau (places)",
+      "type": "stat",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "targets": [
+        { "datasource": { "type": "postgres" }, "format": "table", "rawSql": "SELECT sum(capacity) FROM stations", "refId": "A" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Taux d'occupation moyen du reseau",
+      "type": "gauge",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "orange", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres" },
+          "format": "table",
+          "rawSql": "SELECT avg(num_bikes_available::float / NULLIF(num_bikes_available + num_docks_available, 0)) * 100 FROM disponibilite_releve",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Relevés avec incohérence de capacité",
+      "type": "stat",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "datasource": { "type": "postgres" },
+          "format": "table",
+          "rawSql": "SELECT count(*) FROM disponibilite_releve d JOIN stations s ON s.station_id = d.station_id WHERE d.num_bikes_available + d.num_docks_available > s.capacity + 5",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Évolution horaire de la disponibilité moyenne (vélos)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 5 },
+      "targets": [
+        {
+          "datasource": { "type": "postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT date_trunc('hour', observed_at) AS time, avg(num_bikes_available) AS \"vélos disponibles (moyenne)\" FROM disponibilite_releve GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Stations par commune (top 10)",
+      "type": "barchart",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 9, "w": 8, "x": 16, "y": 5 },
+      "targets": [
+        {
+          "datasource": { "type": "postgres" },
+          "format": "table",
+          "rawSql": "SELECT commune, count(*) AS nb_stations FROM stations WHERE commune IS NOT NULL GROUP BY commune ORDER BY nb_stations DESC LIMIT 10",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Top 10 stations les plus chargées (taux d'occupation)",
+      "type": "table",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "targets": [
+        {
+          "datasource": { "type": "postgres" },
+          "format": "table",
+          "rawSql": "SELECT s.name AS station, s.commune, avg(d.num_bikes_available::float / NULLIF(d.num_bikes_available + d.num_docks_available, 0)) * 100 AS taux_occupation_pct FROM disponibilite_releve d JOIN stations s ON s.station_id = d.station_id GROUP BY s.name, s.commune ORDER BY taux_occupation_pct DESC LIMIT 10",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Dernières alertes qualité (pipeline_alertes)",
+      "type": "table",
+      "datasource": { "type": "postgres" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "targets": [
+        {
+          "datasource": { "type": "postgres" },
+          "format": "table",
+          "rawSql": "SELECT detected_at, alerte_type, severity, description FROM pipeline_alertes ORDER BY detected_at DESC LIMIT 20",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+# Dependances des prototypes Data Analyst / Data Scientist (T7/T8/T9, cf. planning.md).
+# Distinctes de requirements.txt (producteur + job Spark) : ces bibliotheques ne sont utilisees
+# que par les notebooks d'analyse, executes en local par les Data Analysts/Scientists.
+pandas==2.2.3
+matplotlib==3.9.2
+scikit-learn==1.5.2
+sqlalchemy==2.0.35
+# pg8000 (driver pur Python) plutot que psycopg2 : psycopg2/libpq plante avec un
+# UnicodeDecodeError sur Windows lorsque le chemin du projet contient des caracteres
+# accentues (bug constate localement) - pg8000 n'a pas cette dependance C.
+pg8000==1.31.2
+jupyter==1.1.1
+nbconvert==7.16.4
+ipykernel==6.29.5

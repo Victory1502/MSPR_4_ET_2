@@ -22,6 +22,16 @@ Contexte : préparation resserrée sur **39h / 6 jours calendaires** (du 01/07/2
 | T14 | Répétition orale | Toute l'équipe | 0,5 j | T13 |
 | T15 | Soutenance | Toute l'équipe | 20 mn + 30 mn | T14 |
 
+### 1.1 Livrables métier réalisés (T7, T8, T9)
+
+| Tâche | Livrable | Résultat |
+|---|---|---|
+| T7 | Dashboard Grafana `VelibData - Usage` (datasource dédiée `PostgreSQL - VelibData`) — [`mspr-tech/monitoring/grafana/dashboards/velibdata-usage.json`](../../mspr-tech/monitoring/grafana/dashboards/velibdata-usage.json) | 8 panneaux : occupation réseau, tendance horaire, top stations, répartition par commune, alertes qualité |
+| T8 | Notebook [`mspr-tech/analytics/notebooks/01_statistiques_descriptives.ipynb`](../../mspr-tech/analytics/notebooks/01_statistiques_descriptives.ipynb) | 352 stations, 3107 relevés analysés, contrôle qualité fonctionnel (0 incohérence de capacité détectée) |
+| T9 | Notebook [`mspr-tech/analytics/notebooks/02_prediction_demande.ipynb`](../../mspr-tech/analytics/notebooks/02_prediction_demande.ipynb) | Modèle RandomForest (MAE 4,19 vélos, R²=0,716) + esquisse de système de recommandation par distance |
+
+Voir [`mspr-tech/analytics/README.md`](../../mspr-tech/analytics/README.md) pour l'exécution locale (dépendances, connexion à la base).
+
 ## 2. Diagramme de Gantt
 
 ```mermaid

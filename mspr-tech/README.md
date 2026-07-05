@@ -52,7 +52,9 @@ Interfaces web :
 | MinIO Console (load-balancée sur les 4 nœuds) | http://localhost:9001 |
 | Spark Master UI | http://localhost:8080 |
 | Prometheus | http://localhost:9090 |
-| Grafana (dashboard "VelibData - Vue d'ensemble infrastructure") | http://localhost:3000 |
+| Grafana (dashboards "VelibData - Vue d'ensemble infrastructure" et "VelibData - Usage") | http://localhost:3000 |
+
+Si le port 5432 est déjà utilisé sur votre poste (ex. PostgreSQL natif Windows), créez un `docker-compose.override.yml` local (non versionné) republiant `postgres-primary` sur un autre port et ajustez `POSTGRES_PORT` dans `.env` en conséquence (cf. commentaire dans `.env.example`).
 
 ## 4. Tester la tolérance aux pannes
 
@@ -100,6 +102,8 @@ mspr-tech/
 │   └── grafana/                     # Provisioning datasource + dashboard
 ├── k8s/                      # Manifestes Kubernetes équivalents (StatefulSets + HPA autoscaling)
 │   └── README.md             # Déploiement, prérequis (metrics-server), correspondance avec compose
+├── analytics/                # Prototypes Data Analyst/Scientist (T7/T8/T9, cf. docs/bloc2/planning.md)
+│   └── notebooks/            # Statistiques descriptives + prédiction de la demande
 └── tests/
     └── test_quality_rules.py # Tests unitaires (13 cas), exécutés en CI (.github/workflows/ci.yml)
 ```

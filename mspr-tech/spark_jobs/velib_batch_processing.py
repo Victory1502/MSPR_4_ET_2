@@ -328,7 +328,10 @@ def process_disponibilite_batch(batch_df, epoch_id, cfg: PipelineConfig) -> None
         VALUES (%(station_id)s, %(name)s, %(latitude)s, %(longitude)s, %(capacity)s, now())
         ON CONFLICT (station_id) DO NOTHING
     """
-    communes = {(r["station_id"], r["commune"]) for r in rows if r["commune"]}
+    communes = {
+        r["station_id"]: {"station_id": r["station_id"], "commune": r["commune"]}
+        for r in rows if r["commune"]
+    }
     with psycopg2.connect(cfg.postgres_dsn) as conn:
         with conn.cursor() as cur:
             psycopg2.extras.execute_batch(cur, stub_sql, station_stubs)
@@ -336,7 +339,9 @@ def process_disponibilite_batch(batch_df, epoch_id, cfg: PipelineConfig) -> None
         if communes:
             with conn.cursor() as cur:
                 psycopg2.extras.execute_batch(
-                    cur, "UPDATE stations SET commune = %s WHERE station_id = %s", list(communes)
+                    cur,
+                    "UPDATE stations SET commune = %(commune)s WHERE station_id = %(station_id)s",
+                    list(communes.values()),
                 )
     logger.info("Disponibilite : %d/%d lignes valides inserees en base (batch_id=%s)", len(rows), total, batch_id)
 

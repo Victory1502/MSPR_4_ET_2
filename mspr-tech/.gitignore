@@ -3,13 +3,16 @@ Include/
 Lib/
 Scripts/
 share/
+etc/
 pyvenv.cfg
 
 # Artefacts Python
 __pycache__/
 *.pyc
 .pytest_cache/
+.ipynb_checkpoints/
 .env
+docker-compose.override.yml
 
 # Secrets Kubernetes reels (cf. k8s/02-secret.example.yaml, jamais commiter la version renseignee)
 k8s/02-secret.yaml

@@ -349,6 +349,11 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-changeme_grafana}
+      # Consommes par monitoring/grafana/provisioning/datasources/datasource.yml (datasource
+      # "PostgreSQL - VelibData", T7 - dashboard usage business) via variable expansion Grafana.
+      POSTGRES_DB: ${POSTGRES_DB:-velibdata}
+      POSTGRES_USER: ${POSTGRES_USER:-velib_app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     volumes:
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro

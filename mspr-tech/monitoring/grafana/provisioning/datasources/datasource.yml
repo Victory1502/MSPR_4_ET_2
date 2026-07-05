@@ -7,3 +7,19 @@ datasources:
     url: http://prometheus:9090
     isDefault: true
     editable: false
+
+  # Base metier (couche silver) - utilisee par le dashboard "VelibData - Usage" (T7,
+  # cf. velibdata-usage.json). Distincte des exporters infra ci-dessus : ici on interroge
+  # directement stations/disponibilite_releve pour un usage Data Analyst.
+  - name: PostgreSQL - VelibData
+    type: postgres
+    access: proxy
+    url: postgres-primary:5432
+    database: ${POSTGRES_DB}
+    user: ${POSTGRES_USER}
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+    editable: false
